@@ -4,6 +4,7 @@ from minio import Minio
 from io import BytesIO
 import requests
 import json
+import chardet
 
 @dag(
     dag_id="Thai_Open_Dataset_Pipeline_test",
@@ -25,7 +26,7 @@ def Thai_Open_Dataset_Pipeline_test():
         response = requests.get(url, headers=headers)
         json_data = response.json()
 
-        number_end = 6
+        number_end = 10
 
         # Setup MinIO client
         client = Minio(
@@ -47,15 +48,35 @@ def Thai_Open_Dataset_Pipeline_test():
 
             for res in resources:
                 file_url = res['url']
-                filetype = file_url.split('/')[-1].split('.')[-1]
+                filetype = file_url.split('/')[-1].split('.')[-1].lower()
                 filename = f"{res['name'].replace(' ', '_')}.{filetype}"
-                object_name = f"{filename}"
+                object_name = filename
 
                 file_response = requests.get(file_url)
                 if file_response.status_code == 200:
-                    data = BytesIO(file_response.content)
-                    size = len(file_response.content)
+                    file_content = file_response.content
 
+                    # 🔁 แปลง encoding เฉพาะไฟล์ .csv เท่านั้น
+                    if filetype == "csv":
+                        # ตรวจสอบ encoding
+                        detected = chardet.detect(file_content)
+                        encoding = detected.get("encoding", "utf-8")
+
+                        print(f"📌 Detected encoding for {filename}: {encoding}")
+                    
+                        try:
+                            text = file_content.decode(encoding)
+                            utf8_content = text.encode("utf-8-sig")  # ✅ บางโปรแกรมไทยต้องการ BOM ด้วย
+                            data = BytesIO(utf8_content)
+                            size = len(utf8_content)
+                        except Exception as e:
+                            print(f"❌ Failed to convert {filename} to UTF-8: {e}")
+                            continue
+                    else:
+                        data = BytesIO(file_content)
+                        size = len(file_content)
+
+                    # ✅ Upload เข้า MinIO
                     result = client.put_object(
                         bucket_name=bucket_name,
                         object_name=object_name,
@@ -63,9 +84,10 @@ def Thai_Open_Dataset_Pipeline_test():
                         length=size,
                         content_type="application/octet-stream"
                     )
-                    print(f"Uploaded {result.object_name} (etag: {result.etag})")
+                    print(f"✅ Uploaded {result.object_name} (etag: {result.etag})")
                 else:
-                    print(f"Failed to download {file_url}")
+                    print(f"❌ Failed to download {file_url}")
+                
 
     fetch_and_upload()
 
