@@ -207,7 +207,7 @@ def pipeline():
                 obj = minio_client.get_object(BUCKET_NAME, object_path)
                 content = obj.read()
 
-                # พยายามอ่านไฟล์ด้วย encoding ที่รองรับ
+                #อ่านไฟล์ด้วย encoding ที่รองรับ
                 try:
                     df = pd.read_csv(BytesIO(content), encoding='utf-8', low_memory=False)
                 except UnicodeDecodeError:
