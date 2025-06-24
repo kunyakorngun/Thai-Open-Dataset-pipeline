@@ -209,9 +209,9 @@ def pipeline():
 
                 #อ่านไฟล์ด้วย encoding ที่รองรับ
                 try:
-                    df = pd.read_csv(BytesIO(content), encoding='utf-8', low_memory=False)
+                    df = pd.read_csv(BytesIO(content), dtype=None, encoding='utf-8', low_memory=False)
                 except UnicodeDecodeError:
-                    df = pd.read_csv(BytesIO(content), encoding='cp874', low_memory=False)
+                    df = pd.read_csv(BytesIO(content), dtype=None, encoding='cp874', low_memory=False)
 
                 table_name = f"table_{resource_id[:8]}"
 
@@ -224,14 +224,37 @@ def pipeline():
                 )
                 cursor = conn.cursor()
 
-                cols = ', '.join([f'"{c}" TEXT' for c in df.columns])
-                cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols});")
-                conn.commit()
+                pg_type_map = {
+                'int64': 'INTEGER',
+                'float64': 'FLOAT',
+                'object': 'TEXT',
+                'bool': 'BOOLEAN',
+                'datetime64[ns]': 'TIMESTAMP'
+                }
+
+                columns_sql = []
+                for col in df.columns:
+                    dtype = str(df[col].dtype)
+                    pg_type = pg_type_map.get(dtype, 'TEXT')  # fallback เป็น TEXT ถ้าไม่เจอ
+                    columns_sql.append(f'"{col}" {pg_type}')
+
+                create_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)});"
+                cursor.execute(create_sql)
+                
+                # cols = ', '.join([f'"{c}" TEXT' for c in df.columns])
+                # cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols});")
+                # conn.commit()
+
+                # for _, row in df.iterrows():
+                #     values = tuple(str(v) for v in row)
+                #     placeholders = ', '.join(['%s'] * len(values))
+                #     cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
 
                 for _, row in df.iterrows():
-                    values = tuple(str(v) for v in row)
-                    placeholders = ', '.join(['%s'] * len(values))
-                    cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
+                      values = tuple(None if pd.isna(v) else v for v in row)
+                      placeholders = ', '.join(['%s'] * len(values))
+                      cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
+
 
                 conn.commit()
                 cursor.close()
