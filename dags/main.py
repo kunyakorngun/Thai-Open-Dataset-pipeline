@@ -7,6 +7,7 @@ import os
 import json
 import psycopg2
 import pandas as pd
+from sqlalchemy import create_engine
 
 # --- CONFIG ---
 API_KEY = "Np76FNlQTpjMNoUPFJkJc0Nf7cv63vhd"
@@ -187,6 +188,8 @@ def pipeline():
     # โหลดไฟล์จาก MinIO แล้วนำเข้า PostgreSQL
     @task()
     def load_to_postgres(pkg_data: dict):
+        from sqlalchemy import create_engine
+
         minio_client = Minio(
             MINIO_ENDPOINT,
             access_key=MINIO_ACCESS_KEY,
@@ -207,13 +210,67 @@ def pipeline():
                 obj = minio_client.get_object(BUCKET_NAME, object_path)
                 content = obj.read()
 
-                #อ่านไฟล์ด้วย encoding ที่รองรับ
                 try:
-                    df = pd.read_csv(BytesIO(content), dtype=None, encoding='utf-8', low_memory=False)
+                    df = pd.read_csv(BytesIO(content), encoding="utf-8", low_memory=False)
                 except UnicodeDecodeError:
-                    df = pd.read_csv(BytesIO(content), dtype=None, encoding='cp874', low_memory=False)
+                    df = pd.read_csv(BytesIO(content), encoding="cp874", low_memory=False)
 
+                # Clean and normalize column names
+                df.columns = [
+                    col.strip().lower().replace(" ", "_").replace(".", "").replace("-", "_")
+                    for col in df.columns
+                ]
+
+                # Define dtype map
+                dtype_map = {
+                    "no": "float64",
+                    "age": "Int64",
+                    "sex": "str",
+                    "nationality": "str",
+                    "province_of_isolation": "str",
+                    "province_of_onset": "str",
+                    "district_of_onset": "str",
+                    "quarantine": "str",
+                }
+                date_cols = ["notified_date", "announce_date"]
+
+                # Cast dtypes
+                for col, dtype in dtype_map.items():
+                    if col in df.columns:
+                        if dtype == "Int64":
+                            # Only accept values without decimal and coercible to int
+                            df[col] = pd.to_numeric(df[col], errors="coerce")
+                            df[col] = df[col].apply(lambda x: int(x) if pd.notna(x) and x == int(x) else pd.NA).astype("Int64")
+                        elif dtype == "float64":
+                            df[col] = pd.to_numeric(df[col], errors="coerce")
+                        else:
+                            df[col] = df[col].astype(str)
+
+                for col in date_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+
+                # Drop rows with NaN in critical fields only
+                required_cols = ["no", "age", "sex", "nationality", "province_of_isolation"]
+                df.dropna(subset=[col for col in required_cols if col in df.columns], inplace=True)
+
+                # Prepare table
                 table_name = f"table_{resource_id[:8]}"
+
+                pg_type_map = {
+                    "int64": "INTEGER",
+                    "float64": "FLOAT",
+                    "object": "TEXT",
+                    "bool": "BOOLEAN",
+                    "datetime64[ns]": "TIMESTAMP",
+                    "Int64": "INTEGER"
+                }
+
+                columns_sql = []
+                for col in df.columns:
+                    dtype = str(df[col].dtype)
+                    pg_type = pg_type_map.get(dtype, "TEXT")
+                    columns_sql.append(f'"{col}" {pg_type}')
 
                 conn = psycopg2.connect(
                     host=PG_HOST,
@@ -223,46 +280,24 @@ def pipeline():
                     password=PG_PASSWORD
                 )
                 cursor = conn.cursor()
+                cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)});")
+                conn.commit()
 
-                pg_type_map = {
-                'int64': 'INTEGER',
-                'float64': 'FLOAT',
-                'object': 'TEXT',
-                'bool': 'BOOLEAN',
-                'datetime64[ns]': 'TIMESTAMP'
-                }
-
-                columns_sql = []
-                for col in df.columns:
-                    dtype = str(df[col].dtype)
-                    pg_type = pg_type_map.get(dtype, 'TEXT')  # fallback เป็น TEXT ถ้าไม่เจอ
-                    columns_sql.append(f'"{col}" {pg_type}')
-
-                create_sql = f"CREATE TABLE IF NOT EXISTS {table_name} ({', '.join(columns_sql)});"
-                cursor.execute(create_sql)
-                
-                # cols = ', '.join([f'"{c}" TEXT' for c in df.columns])
-                # cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols});")
-                # conn.commit()
-
-                # for _, row in df.iterrows():
-                #     values = tuple(str(v) for v in row)
-                #     placeholders = ', '.join(['%s'] * len(values))
-                #     cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
-
+                # Insert with psycopg2
                 for _, row in df.iterrows():
-                      values = tuple(None if pd.isna(v) else v for v in row)
-                      placeholders = ', '.join(['%s'] * len(values))
-                      cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
-
+                    values = tuple(None if pd.isna(v) else v for v in row)
+                    placeholders = ", ".join(["%s"] * len(values))
+                    cursor.execute(f"INSERT INTO {table_name} VALUES ({placeholders})", values)
 
                 conn.commit()
                 cursor.close()
                 conn.close()
-                print(f"Loaded to PostgreSQL: {table_name}")
+                print(f"✅ Loaded to PostgreSQL: {table_name}")
 
             except Exception as e:
-                print(f"Error loading resource {resource_id} to postgres: {e}")
+                print(f"❌ Error loading resource {resource_id} to postgres: {e}")
+
+
 
     # === DAG flow ===
     pkg = get_package_detail()
