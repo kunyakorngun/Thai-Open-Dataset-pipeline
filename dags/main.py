@@ -296,12 +296,144 @@ def pipeline():
 
             except Exception as e:
                 print(f"❌ Error loading resource {resource_id} to postgres: {e}")
+            
+ 
 
+    @task()
+    def create_data_marts():
+        # Connection config
+        print("🔌 Connecting to PostgreSQL databases...")
+        mart1_conn = psycopg2.connect(
+            host="postgres_db_mart1",
+            port=5432,
+            database="postgres_mart1",
+            user="postgres",
+            password="postgres123"
+        )
 
+        mart2_conn = psycopg2.connect(
+            host="postgres_db_mart2",
+            port=5432,
+            database="postgres_mart2",
+            user="postgres",
+            password="postgres123"
+        )
+
+        main_conn = psycopg2.connect(
+            host="postgres_db",
+            port=5432,
+            database="postgres",
+            user="postgres",
+            password="postgres123"
+        )
+
+        print("Connected to all databases.")
+
+        main_cursor = main_conn.cursor()
+        main_cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+        table_names = [r[0] for r in main_cursor.fetchall() if r[0].startswith("table_")]
+        print(f"Found tables: {table_names}")
+
+        mart1_df = pd.DataFrame()
+        mart2_df = pd.DataFrame()
+
+        for table in table_names:
+            try:
+                print(f" Reading data from table: {table}")
+                df = pd.read_sql_query(f'SELECT * FROM "{table}"', main_conn)
+
+                # Collect for mart1
+                mart1_cols = [col for col in ["sex", "age", "nationality"] if col in df.columns]
+                if len(mart1_cols) == 3:
+                    print(f"Adding data to mart1 from table: {table}")
+                    mart1_df = pd.concat([mart1_df, df[mart1_cols]])
+
+                # Collect for mart2
+                mart2_cols = ["province_of_isolation", "province_of_onset", "district_of_onset"]
+                mart2_cols = [col for col in mart2_cols if col in df.columns]
+                if len(mart2_cols) == 3:
+                    print(f" Adding data to mart2 from table: {table}")
+                    mart2_df = pd.concat([mart2_df, df[mart2_cols]])
+            except Exception as e:
+                print(f"Error reading table {table}: {e}")
+
+        # Load to mart1
+        print("Loading data into mart1...")
+        mart1_cursor = mart1_conn.cursor()
+        # mart1_cursor.execute("DROP TABLE IF EXISTS data_mart1")
+        mart1_cursor.execute("""
+            CREATE TABLE data_mart1 (
+                sex TEXT,
+                age FLOAT,  
+                nationality TEXT
+            )
+        """)
+        for _, row in mart1_df.iterrows():
+            try:
+                age_val = float(row["age"]) if not pd.isna(row["age"]) else None
+                sex_val = str(row["sex"]) if not pd.isna(row["sex"]) else None
+                nat_val = str(row["nationality"]) if not pd.isna(row["nationality"]) else None
+                mart1_cursor.execute(
+                    "INSERT INTO data_mart1 (sex, age, nationality) VALUES (%s, %s, %s)",
+                    (sex_val, age_val, nat_val)
+                )
+            except Exception as e:
+                print(f" Skipping row due to error: {e} → {row.to_dict()}")
+        mart1_conn.commit()
+        print(" Finished loading data_mart1")
+
+        # # Load to mart1
+        # print("Loading data into mart1...")
+        # mart1_cursor = mart1_conn.cursor()
+        # mart1_cursor.execute("DROP TABLE IF EXISTS data_mart1")
+        # mart1_cursor.execute("""
+        #     CREATE TABLE data_mart1 (
+        #         sex TEXT,
+        #         age INTEGER,
+        #         nationality TEXT
+        #     )
+        # """)
+        # for _, row in mart1_df.iterrows():
+        #     mart1_cursor.execute(
+        #         "INSERT INTO data_mart1 (sex, age, nationality) VALUES (%s, %s, %s)",
+        #         tuple(None if pd.isna(v) else v for v in row)
+        #     )
+        # mart1_conn.commit()
+        # print("✅ Finished loading data_mart1")
+
+        # Load to mart2
+        print(" Loading data into mart2...")
+        mart2_cursor = mart2_conn.cursor()
+        mart2_cursor.execute("DROP TABLE IF EXISTS data_mart2")
+        mart2_cursor.execute("""
+            CREATE TABLE data_mart2 (
+                province_of_isolation TEXT,
+                province_of_onset TEXT,
+                district_of_onset TEXT
+            )
+        """)
+        for _, row in mart2_df.iterrows():
+            mart2_cursor.execute(
+                "INSERT INTO data_mart2 (province_of_isolation, province_of_onset, district_of_onset) VALUES (%s, %s, %s)",
+                tuple(None if pd.isna(v) else v for v in row)
+            )
+        mart2_conn.commit()
+        print(" Finished loading data_mart2")
+
+        # Close connections
+        mart1_cursor.close()
+        mart2_cursor.close()
+        main_cursor.close()
+        mart1_conn.close()
+        mart2_conn.close()
+        main_conn.close()
+
+        print(" Data marts created successfully.")
 
     # === DAG flow ===
     pkg = get_package_detail()
     uploaded_pkg = upload_to_minio(pkg)
-    load_to_postgres(uploaded_pkg)
+    # load_to_postgres(uploaded_pkg)
+    load_to_postgres(uploaded_pkg) >> create_data_marts()
 
 dag = pipeline()
