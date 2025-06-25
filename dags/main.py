@@ -329,24 +329,26 @@ def pipeline():
 
         print("Connected to all databases.")
 
+        #ดึงรายชื่อ table ที่ต้องใช้
         main_cursor = main_conn.cursor()
         main_cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
         table_names = [r[0] for r in main_cursor.fetchall() if r[0].startswith("table_")]
         print(f"Found tables: {table_names}")
 
-
+        #เตรียม dataframe เปล่าสำหรับเก็บข้อมูล
         mart2_df = pd.DataFrame()
-
+        #อ่านข้อมูล chunk ละ 1000 แถว
         for table in table_names:
             try:
                 print(f" Reading data from table: {table}")
                 chunks = pd.read_sql_query(f'SELECT * FROM "{table}"', main_conn, chunksize=1000)
-
+                #ตรวจสอบว่ามี column ที่ต้องใช้มั้ย
                 for chunk in chunks:
                     mart2_cols = ["province_of_isolation", "province_of_onset", "district_of_onset"]
                     mart2_cols = [col for col in mart2_cols if col in chunk.columns]
                     if len(mart2_cols) == 3:
                         print(f" Adding data to mart2 from table: {table}")
+                        #ถ้ามีก็รวมใส่ mart2_df
                         mart2_df = pd.concat([mart2_df, chunk[mart2_cols]], ignore_index=True)
 
             except Exception as e:
@@ -355,14 +357,16 @@ def pipeline():
         # Load to mart2
         print(" Loading data into mart2...")
         mart2_cursor = mart2_conn.cursor()
-        mart2_cursor.execute("DROP TABLE IF EXISTS data_mart2")
-        mart2_cursor.execute("""
+        mart2_cursor.execute("DROP TABLE IF EXISTS data_mart2") #ลบตารางเดิมออกถ้ามีแล้ว
+        #สรา้งตารางใหม่
+        mart2_cursor.execute(""" 
             CREATE TABLE data_mart2 (
                 province_of_isolation TEXT,
                 province_of_onset TEXT,
                 district_of_onset TEXT
             )
         """)
+        #loop ใส่ข้อมูลทีละแถว
         for _, row in mart2_df.iterrows():
             mart2_cursor.execute(
                 "INSERT INTO data_mart2 (province_of_isolation, province_of_onset, district_of_onset) VALUES (%s, %s, %s)",
