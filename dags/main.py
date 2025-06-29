@@ -19,7 +19,7 @@ PACKAGE_NAME = "covid-19-daily"
 LOG_PATH = "/opt/airflow/logs/resource_log.log"
 
 # PostgreSQL config
-PG_HOST = "postgres_db"
+PG_HOST = "postgres_db3"
 PG_PORT = 5432
 PG_DB = "postgres"
 PG_USER = "postgres"
@@ -197,22 +197,22 @@ def pipeline():
             secure=False
         )
 
-        title = pkg_data["title"].replace("/", "_").replace("\\", "_").strip()
+        title = pkg_data["title"].replace("/", "_").replace("\\", "_").strip() # strip() ใช้ลบช่องว่าง
 
-        for resource in pkg_data["resources"]:
-            resource_id = resource["id"]
-            name = resource.get("name", resource_id).strip().replace("/", "_")
-            ext = os.path.splitext(resource.get("url", ""))[-1] or ".csv"
-            filename = f"{name}{ext}"
-            object_path = f"{title}/{filename}"
+        for resource in pkg_data["resources"]: #เข้าไปในpackage แล้วเข้าไปใน resource อีกชั้น เราลูปทุก resource
+            resource_id = resource["id"] #เอา resource id มา
+            name = resource.get("name", resource_id).strip().replace("/", "_") #เอาชื่อไฟล์มา
+            ext = os.path.splitext(resource.get("url", ""))[-1] or ".csv" # ดึงค่า url จาก dict. resource, os.path.splitext ฟังก์ชั่นแยก string ออกเป็นชื่อไฟล์กับนามสกุล
+            filename = f"{name}{ext}" #ชื่อไฟล์ที่จะไปดึงจากminio
+            object_path = f"{title}/{filename}" #path file ที่จะไปดึงมาจาก minio
 
             try:
-                obj = minio_client.get_object(BUCKET_NAME, object_path)
+                obj = minio_client.get_object(BUCKET_NAME, object_path) #โหลดไฟล์จาก minio
                 content = obj.read()
 
-                try:
-                    df = pd.read_csv(BytesIO(content), encoding="utf-8", low_memory=False)
-                except UnicodeDecodeError:
+                try: #โหลดไฟล์จาก minio เป็น binary content
+                    df = pd.read_csv(BytesIO(content), encoding="utf-8", low_memory=False) #แปลงไฟล์เป็น utf-8 
+                except UnicodeDecodeError: 
                     df = pd.read_csv(BytesIO(content), encoding="cp874", low_memory=False)
 
                 # Clean and normalize column names
@@ -238,21 +238,22 @@ def pipeline():
                 for col, dtype in dtype_map.items():
                     if col in df.columns:
                         if dtype == "Int64":
-                            # Only accept values without decimal and coercible to int
                             df[col] = pd.to_numeric(df[col], errors="coerce")
-                            df[col] = df[col].apply(lambda x: int(x) if pd.notna(x) and x == int(x) else pd.NA).astype("Int64")
+                            df[col] = df[col].apply(lambda x: int(x) if pd.notna(x) else pd.NA).astype("Int64")
                         elif dtype == "float64":
                             df[col] = pd.to_numeric(df[col], errors="coerce")
                         else:
                             df[col] = df[col].astype(str)
+
 
                 for col in date_cols:
                     if col in df.columns:
                         df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
 
                 # Drop rows with NaN in critical fields only
-                required_cols = ["no", "age", "sex", "nationality", "province_of_isolation"]
-                df.dropna(subset=[col for col in required_cols if col in df.columns], inplace=True)
+                # required_cols = ["no", "age", "sex", "nationality", "province_of_isolation"]
+                # df.dropna(subset=[col for col in required_cols if col in df.columns], inplace=True)
+                df.dropna(inplace=True)
 
                 # Prepare table
                 table_name = f"table_{resource_id[:8]}"
@@ -302,23 +303,24 @@ def pipeline():
     @task()
     def create_data_marts():
         # Connection config
-        print(" Connecting to PostgreSQL databases...")
-
-        mart_conn = psycopg2.connect( #แก้ให้มันเก็บใน database postgres อันเก่า
-            host="postgres_db",
-            port=5432,
-            database="data_mart",
-            user="postgres",
-            password="postgres123"
-        )
+        print("Connecting to PostgreSQL databases...")
 
         main_conn = psycopg2.connect(
-            host="postgres_db",
+            host="postgres_db3",
             port=5432,
             database="postgres",
             user="postgres",
             password="postgres123"
         )
+
+        mart_conn = psycopg2.connect(
+            host="postgres_db3",
+            port=5432,
+            database="mart",
+            user="postgres",
+            password="postgres123"
+        )
+
 
         print("Connected to all databases.")
 
@@ -350,7 +352,7 @@ def pipeline():
         # Load to mart
         print(" Loading data into mart...")
         mart_cursor = mart_conn.cursor()
-        mart_cursor.execute("DROP TABLE IF EXISTS data_mart") #ลบตารางเดิมออกถ้ามีแล้ว
+        mart_cursor.execute("DROP TABLE IF EXISTS mart") #ลบตารางเดิมออกถ้ามีแล้ว
         #สรา้งตารางใหม่
         mart_cursor.execute(""" 
             CREATE TABLE data_mart (
