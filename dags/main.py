@@ -337,17 +337,20 @@ def pipeline():
             try:
                 print(f" Reading data from table: {table}")
                 chunks = pd.read_sql_query(f'SELECT * FROM "{table}"', main_conn, chunksize=1000)
-                #ตรวจสอบว่ามี column ที่ต้องใช้มั้ย
+                total_rows = 0  # ตัวนับจำนวนแถวที่ดึงมาแล้ว
                 for chunk in chunks:
-                    mart_cols = ["province_of_isolation", "province_of_onset", "district_of_onset"]
+                    mart_cols = ["age", "sex", "nationality"]
                     mart_cols = [col for col in mart_cols if col in chunk.columns]
                     if len(mart_cols) == 3:
                         print(f" Adding data to mart from table: {table}")
-                        #ถ้ามีก็รวมใส่ mart_df
                         mart_df = pd.concat([mart_df, chunk[mart_cols]], ignore_index=True)
-
+                        total_rows += len(chunk)
+                        if total_rows >= 10000:
+                            print(f"Reached 10,000 rows limit for table: {table}, stop reading more chunks.")
+                            break  # ออกจาก loop อ่าน chunk ต่อ
             except Exception as e:
                 print(f" Error reading table {table}: {e}")
+
 
         # Load to mart
         print(" Loading data into mart...")
@@ -356,15 +359,15 @@ def pipeline():
         #สรา้งตารางใหม่
         mart_cursor.execute(""" 
             CREATE TABLE data_mart (
-                province_of_isolation TEXT,
-                province_of_onset TEXT,
-                district_of_onset TEXT
+                age INT,
+                sex TEXT,
+                nationality TEXT
             )
         """)
         #loop ใส่ข้อมูลทีละแถว
         for _, row in mart_df.iterrows():
             mart_cursor.execute(
-                "INSERT INTO data_mart (province_of_isolation, province_of_onset, district_of_onset) VALUES (%s, %s, %s)",
+                "INSERT INTO data_mart (age, sex, nationality) VALUES (%s, %s, %s)",
                 tuple(None if pd.isna(v) else v for v in row)
             )
         mart_conn.commit()
