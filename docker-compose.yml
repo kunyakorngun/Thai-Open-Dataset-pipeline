@@ -242,60 +242,40 @@ services:
     command: server /data --console-address ":9001"
 
 
-  postgres_db:
-    image: postgres:17.5
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: postgres
-    volumes:
-      - postgres-db-volume-new:/var/lib/postgresql/data
-    ports:
-      - 5430:5432
-
-  # postgres_db:
-  #     image: postgres:17.5
-  #     environment:
-  #       POSTGRES_USER: postgres
-  #       POSTGRES_PASSWORD: postgres123
-  #       POSTGRES_MULTIPLE_DATABASES: "postgres","data_mart"
-  #     volumes:
-  #       - postgres-db-volume-new:/var/lib/postgresql/data
-  #     ports:
-  #       - 5430:5432
-
+#   postgres_db:
+#       image: postgres:17.5
+#       environment:
+#         POSTGRES_USER: postgres
+#         POSTGRES_PASSWORD: postgres123
+#         POSTGRES_DB: postgres
+#       volumes:
+#         - postgres-db-volume-new:/var/lib/postgresql/data
+#         - ./init-multi-db.sh:/docker-entrypoint-initdb.d/init-multi-db.sh:ro
+#       ports:
+#         - 5430:5432
+  
 
 # volumes:
 #   postgres-db-volume:
 #   minio-data-volume:
 #   postgres-db-volume-new:
 
-  postgres_db_mart1:
-    image: postgres:17.5
+
+
+  postgres_db3:
+    image: postgres:16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: postgres_mart1
-    volumes:
-      - postgres-db-volume-mart1:/var/lib/postgresql/data
+      POSTGRES_DB: postgres # default db สำหรับเริ่มต้น
     ports:
-      - 5431:5432
-
-  postgres_db_mart2:
-    image: postgres:17.5
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: postgres_mart2
+      - "5434:5432"
     volumes:
-      - postgres-db-volume-mart2:/var/lib/postgresql/data
-    ports:
-      - 5433:5432  # หรือเปลี่ยนเป็น 5433 ถ้า 5432 ถูกใช้งานอยู่
-
+      - postgres-data-volume:/var/lib/postgresql/data
+      - ./init-multi-db.sh:/docker-entrypoint-initdb.d/init-multi-db.sh:ro
 volumes:
-  minio-data-volume:
+  postgres-data-volume:
   postgres-db-volume:
-  postgres-db-volume-new:
-  postgres-db-volume-mart1:
-  postgres-db-volume-mart2:
-  
+  minio-data-volume:
+  # postgres-db-volume-new:
+
