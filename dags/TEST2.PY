@@ -14,7 +14,7 @@ URL = "https://opend.data.go.th/get-ckan/package_search?q="
 
 payload = {}
 headers = {
-  'api-key': 'Np76FNlQTpjMNoUPFJkJc0Nf7cv63vhd' #กำหนด header ตามที่ ckan กำหนด
+  'api-key': '' #กำหนด header ตามที่ ckan กำหนด
 }
 
 package_name = "covid-19-daily"
