@@ -10,7 +10,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 # --- CONFIG ---
-API_KEY = "Np76FNlQTpjMNoUPFJkJc0Nf7cv63vhd"
+API_KEY = ""
 MINIO_ENDPOINT = "minio:9000"
 MINIO_ACCESS_KEY = "minio"
 MINIO_SECRET_KEY = "minio123"
