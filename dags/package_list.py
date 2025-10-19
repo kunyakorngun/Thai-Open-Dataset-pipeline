@@ -1,7 +1,7 @@
 import requests
 import json
 
-API_KEY = "SVvAl1yR9ACOaVTY09V3lyuehgHFLnMe"
+API_KEY = ""
 BATCH_SIZE = 1000
 OUTPUT_FILE = "./package_batches.json"
 
