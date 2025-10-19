@@ -21,7 +21,7 @@ import requests
 def fetch_data():
         url = "https://opend.data.go.th/get-ckan/package_search?q="
         headers = {
-            "api-key" : "Np76FNlQTpjMNoUPFJkJc0Nf7cv63vhd"
+            "api-key" : ""
         }
 
         package_name = "covid-19-daily"
